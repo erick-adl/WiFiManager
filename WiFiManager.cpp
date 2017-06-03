@@ -17,23 +17,22 @@ WiFiManagerParameter::WiFiManagerParameter(const char *custom) {
   _placeholder = NULL;
   _length = 0;
   _value = NULL;
-  _labelPlacement = WFM_LABEL_BEFORE;
+
   _customHTML = custom;
 }
 
 WiFiManagerParameter::WiFiManagerParameter(const char *id, const char *placeholder, const char *defaultValue, int length) {
-  init(id, placeholder, defaultValue, length, "", WFM_LABEL_BEFORE);
+  init(id, placeholder, defaultValue, length, "");
 }
 
 WiFiManagerParameter::WiFiManagerParameter(const char *id, const char *placeholder, const char *defaultValue, int length, const char *custom) {
-  init(id, placeholder, defaultValue, length, custom, WFM_LABEL_BEFORE);
+  init(id, placeholder, defaultValue, length, custom);
 }
 
-void WiFiManagerParameter::init(const char *id, const char *placeholder, const char *defaultValue, int length, const char *custom, int labelPlacement) {
+void WiFiManagerParameter::init(const char *id, const char *placeholder, const char *defaultValue, int length, const char *custom) {
   _id = id;
   _placeholder = placeholder;
   _length = length;
-  _labelPlacement = labelPlacement;
   _value = new char[length + 1];
   for (int i = 0; i < length; i++) {
     _value[i] = 0;
@@ -57,9 +56,6 @@ const char* WiFiManagerParameter::getPlaceholder() {
 int WiFiManagerParameter::getValueLength() {
   return _length;
 }
-int WiFiManagerParameter::getLabelPlacement() {
-  return _labelPlacement;
-}
 const char* WiFiManagerParameter::getCustomHTML() {
   return _customHTML;
 }
@@ -68,14 +64,6 @@ WiFiManager::WiFiManager() {
 }
 
 void WiFiManager::addParameter(WiFiManagerParameter *p) {
-  if(_paramsCount + 1 > WIFI_MANAGER_MAX_PARAMS)
-  {
-    //Max parameters exceeded!
-	DEBUG_WM("WIFI_MANAGER_MAX_PARAMS exceeded, increase number (in WiFiManager.h) before adding more parameters!");
-	DEBUG_WM("Skipping parameter with ID:");
-	DEBUG_WM(p->getID());
-	return;
-  }
   _params[_paramsCount] = p;
   _paramsCount++;
   DEBUG_WM("Adding parameter");
@@ -127,7 +115,8 @@ void WiFiManager::setupConfigPortal() {
   server->on("/wifisave", std::bind(&WiFiManager::handleWifiSave, this));
   server->on("/i", std::bind(&WiFiManager::handleInfo, this));
   server->on("/r", std::bind(&WiFiManager::handleReset, this));
-  //server->on("/fwlink", std::bind(&WiFiManager::handleRoot, this));  //Microsoft captive portal. Maybe not needed. Might be handled by notFound handler.
+  //server->on("/generate_204", std::bind(&WiFiManager::handle204, this));  //Android/Chrome OS captive portal check.
+  server->on("/fwlink", std::bind(&WiFiManager::handleRoot, this));  //Microsoft captive portal. Maybe not needed. Might be handled by notFound handler.
   server->onNotFound (std::bind(&WiFiManager::handleNotFound, this));
   server->begin(); // Web server start
   DEBUG_WM(F("HTTP server started"));
@@ -144,8 +133,8 @@ boolean WiFiManager::autoConnect(char const *apName, char const *apPassword) {
   DEBUG_WM(F("AutoConnect"));
 
   // read eeprom for ssid and pass
-  //String ssid = getSSID();
-  //String pass = getPassword();
+  String ssid = getSSID();
+  String pass = getPassword();
 
   // attempt to connect; should it fail, fall back to AP
   WiFi.mode(WIFI_STA);
@@ -158,19 +147,6 @@ boolean WiFiManager::autoConnect(char const *apName, char const *apPassword) {
   }
 
   return startConfigPortal(apName, apPassword);
-}
-
-boolean WiFiManager::configPortalHasTimeout(){
-    if(_configPortalTimeout == 0 || wifi_softap_get_station_num() > 0){
-      _configPortalStart = millis(); // kludge, bump configportal start time to skew timeouts
-      return false;
-    }
-    return (millis() > _configPortalStart + _configPortalTimeout);
-}
-
-boolean WiFiManager::startConfigPortal() {
-  String ssid = "ESP" + String(ESP.getChipId());
-  return startConfigPortal(ssid.c_str(), NULL);
 }
 
 boolean  WiFiManager::startConfigPortal(char const *apName, char const *apPassword) {
@@ -189,11 +165,7 @@ boolean  WiFiManager::startConfigPortal(char const *apName, char const *apPasswo
   connect = false;
   setupConfigPortal();
 
-  while(1){
-
-    // check if timeout
-    if(configPortalHasTimeout()) break;
-
+  while (_configPortalTimeout == 0 || millis() < _configPortalStart + _configPortalTimeout) {
     //DNS
     dnsServer->processNextRequest();
     //HTTP
@@ -310,7 +282,12 @@ void WiFiManager::startWPS() {
   WiFi.beginWPSConfig();
   DEBUG_WM("END WPS");
 }
-/*
+
+  IPAddress WiFiManager::getIpAddress() {
+		
+	return WiFi.localIP();
+  }
+
   String WiFiManager::getSSID() {
   if (_ssid == "") {
     DEBUG_WM(F("Reading SSID"));
@@ -330,7 +307,7 @@ void WiFiManager::startWPS() {
   }
   return _pass;
   }
-*/
+
 String WiFiManager::getConfigPortalSSID() {
   return _apName;
 }
@@ -494,22 +471,7 @@ void WiFiManager::handleWifi(boolean scan) {
       break;
     }
 
-    //String pitem = FPSTR(HTTP_FORM_PARAM);
-    String pitem;
-    switch (_params[i]->getLabelPlacement()) {
-      case WFM_LABEL_BEFORE:
-        pitem = FPSTR(HTTP_FORM_LABEL);
-        pitem += FPSTR(HTTP_FORM_PARAM);
-        break;
-      case WFM_LABEL_AFTER:
-        pitem = FPSTR(HTTP_FORM_PARAM);
-        pitem += FPSTR(HTTP_FORM_LABEL);
-        break;
-      default:
-        // WFM_NO_LABEL
-        pitem = FPSTR(HTTP_FORM_PARAM);
-        break;
-    }
+    String pitem = FPSTR(HTTP_FORM_PARAM);
     if (_params[i]->getID() != NULL) {
       pitem.replace("{i}", _params[i]->getID());
       pitem.replace("{n}", _params[i]->getID());
